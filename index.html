@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>三資料夾相同檔案比對工具</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="container">
+      <h1>三資料夾相同檔案比對工具</h1>
+
+      <section class="controls">
+        <div class="folder-pickers">
+          <label class="picker">
+            <span>資料夾 A</span>
+            <input id="dirA" type="file" webkitdirectory directory multiple>
+          </label>
+          <label class="picker">
+            <span>資料夾 B</span>
+            <input id="dirB" type="file" webkitdirectory directory multiple>
+          </label>
+          <label class="picker">
+            <span>資料夾 C（可選）</span>
+            <input id="dirC" type="file" webkitdirectory directory multiple>
+          </label>
+        </div>
+
+        <div class="options">
+          <label class="option">
+            <input id="compareMode" type="checkbox" checked>
+            <span>以內容雜湊比對 (SHA-256)</span>
+          </label>
+          <label class="option">
+            <input id="nameFallback" type="checkbox">
+            <span>同名同路徑也視為相同 (僅做輔助標記)</span>
+          </label>
+        </div>
+
+        <div class="actions">
+          <button id="startBtn" disabled>開始比對</button>
+          <button id="resetBtn" class="secondary">清除</button>
+        </div>
+
+        <div id="status" class="status">請至少選擇兩個資料夾</div>
+        <div id="progressWrap" class="progress hidden">
+          <div id="progressBar" class="bar" style="width:0%"></div>
+        </div>
+      </section>
+
+      <section id="summary" class="summary hidden"></section>
+
+      <section class="results">
+        <h2>結果</h2>
+        <div class="legend">
+          <span class="badge all3">三處相同</span>
+          <span class="badge any2">兩處相同</span>
+          <span class="badge name-match">同名同路徑</span>
+        </div>
+        <table id="resultsTable">
+          <thead>
+            <tr>
+              <th>檔案(相對路徑)</th>
+              <th>大小</th>
+              <th>雜湊</th>
+              <th>A</th>
+              <th>B</th>
+              <th>C</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </section>
+    </div>
+
+    <script src="./script.js"></script>
+  </body>
+  </html>
+
+
