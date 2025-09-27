@@ -162,36 +162,86 @@ async function buildFileMap(files, useHash, progressCb, signal) {
   // Map key: hash if useHash, else path; value: { paths: Set<path>, size }
   const map = new Map();
   let skipped = 0;
-  for (const file of files) {
-    // Check if operation was aborted
-    if (signal && signal.aborted) {
-      throw new Error('AbortError');
+  
+  if (useHash) {
+    // Two-phase approach: first group by name+size, then hash only candidates
+    const nameSizeMap = new Map();
+    
+    // Phase 1: Group by name+size
+    for (const file of files) {
+      if (signal && signal.aborted) {
+        throw new Error('AbortError');
+      }
+      
+      const relPath = file.webkitRelativePath || file.name;
+      const size = file.size;
+      const nameSizeKey = `${relPath}:${size}`;
+      
+      if (!nameSizeMap.has(nameSizeKey)) {
+        nameSizeMap.set(nameSizeKey, []);
+      }
+      nameSizeMap.get(nameSizeKey).push(file);
+      progressCb();
     }
     
-    const relPath = file.webkitRelativePath || file.name;
-    const size = file.size;
-    let key;
-    let hashHex = '';
-    try {
-      if (useHash) {
-        hashHex = await sha256File(file);
-        key = `${hashHex}`;
-      } else {
-        key = relPath;
+    // Phase 2: Hash only files that have potential duplicates
+    for (const [nameSizeKey, fileList] of nameSizeMap) {
+      if (signal && signal.aborted) {
+        throw new Error('AbortError');
       }
-      const existed = map.get(key) || { paths: new Set(), hash: hashHex, size };
+      
+      if (fileList.length > 1) {
+        // Multiple files with same name+size, need to hash them
+        for (const file of fileList) {
+          const relPath = file.webkitRelativePath || file.name;
+          const size = file.size;
+          let hashHex = '';
+          
+          try {
+            hashHex = await sha256File(file);
+            const key = `${hashHex}`;
+            const existed = map.get(key) || { paths: new Set(), hash: hashHex, size };
+            existed.paths.add(relPath);
+            existed.size = size;
+            existed.hash = hashHex;
+            map.set(key, existed);
+          } catch (e) {
+            skipped += 1;
+            console.warn('Skip unreadable file:', relPath, e);
+          }
+        }
+      } else {
+        // Single file with this name+size, no need to hash
+        const file = fileList[0];
+        const relPath = file.webkitRelativePath || file.name;
+        const size = file.size;
+        const key = nameSizeKey; // Use name+size as key for unique files
+        const existed = map.get(key) || { paths: new Set(), hash: '', size };
+        existed.paths.add(relPath);
+        existed.size = size;
+        existed.hash = '';
+        map.set(key, existed);
+      }
+    }
+  } else {
+    // Original approach for name-only comparison
+    for (const file of files) {
+      if (signal && signal.aborted) {
+        throw new Error('AbortError');
+      }
+      
+      const relPath = file.webkitRelativePath || file.name;
+      const size = file.size;
+      const key = relPath;
+      const existed = map.get(key) || { paths: new Set(), hash: '', size };
       existed.paths.add(relPath);
       existed.size = size;
-      existed.hash = hashHex || existed.hash;
+      existed.hash = '';
       map.set(key, existed);
-    } catch (e) {
-      // Skip unreadable files and continue
-      skipped += 1;
-      console.warn('Skip unreadable file:', relPath, e);
-    } finally {
       progressCb();
     }
   }
+  
   return { map, skipped };
 }
 
