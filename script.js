@@ -167,30 +167,43 @@ async function buildFileMap(files, useHash, progressCb, signal) {
     // Two-phase approach: first group by name+size, then hash only candidates
     const nameSizeMap = new Map();
     
-    // Phase 1: Group by name+size
-    for (const file of files) {
+    // Phase 1: Group by name+size (with batching for large folders)
+    const batchSize = 1000; // Process files in batches
+    for (let i = 0; i < files.length; i += batchSize) {
       if (signal && signal.aborted) {
         throw new Error('AbortError');
       }
       
-      const relPath = file.webkitRelativePath || file.name;
-      const size = file.size;
-      const nameSizeKey = `${relPath}:${size}`;
-      
-      if (!nameSizeMap.has(nameSizeKey)) {
-        nameSizeMap.set(nameSizeKey, []);
+      const batch = files.slice(i, i + batchSize);
+      for (const file of batch) {
+        const relPath = file.webkitRelativePath || file.name;
+        const size = file.size;
+        const nameSizeKey = `${relPath}:${size}`;
+        
+        if (!nameSizeMap.has(nameSizeKey)) {
+          nameSizeMap.set(nameSizeKey, []);
+        }
+        nameSizeMap.get(nameSizeKey).push(file);
+        progressCb();
       }
-      nameSizeMap.get(nameSizeKey).push(file);
-      progressCb();
+      
+      // Allow other operations to run between batches
+      if (i + batchSize < files.length) {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
     }
     
-    // Phase 2: Hash only files that have potential duplicates
-    for (const [nameSizeKey, fileList] of nameSizeMap) {
+    // Phase 2: Hash only files that have potential duplicates (with batching)
+    const candidates = Array.from(nameSizeMap.entries()).filter(([_, fileList]) => fileList.length > 1);
+    const hashBatchSize = 10; // Smaller batch size for hashing (more CPU intensive)
+    
+    for (let i = 0; i < candidates.length; i += hashBatchSize) {
       if (signal && signal.aborted) {
         throw new Error('AbortError');
       }
       
-      if (fileList.length > 1) {
+      const batch = candidates.slice(i, i + hashBatchSize);
+      for (const [nameSizeKey, fileList] of batch) {
         // Multiple files with same name+size, need to hash them
         for (const file of fileList) {
           const relPath = file.webkitRelativePath || file.name;
@@ -210,8 +223,17 @@ async function buildFileMap(files, useHash, progressCb, signal) {
             console.warn('Skip unreadable file:', relPath, e);
           }
         }
-      } else {
-        // Single file with this name+size, no need to hash
+      }
+      
+      // Allow other operations to run between hash batches
+      if (i + hashBatchSize < candidates.length) {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    }
+    
+    // Add unique files (no hashing needed)
+    for (const [nameSizeKey, fileList] of nameSizeMap) {
+      if (fileList.length === 1) {
         const file = fileList[0];
         const relPath = file.webkitRelativePath || file.name;
         const size = file.size;
