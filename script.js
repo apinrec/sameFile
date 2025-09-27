@@ -89,6 +89,13 @@ startBtn.addEventListener('click', async () => {
     const filesA = Array.from(dirA.files);
     const filesB = Array.from(dirB.files);
     const filesC = Array.from(dirC.files);
+    
+    // Check total file count for Raspberry Pi limitations
+    const totalFiles = filesA.length + filesB.length + filesC.length;
+    if (totalFiles > 10000) {
+      statusEl.textContent = `檔案數量過多 (${totalFiles})，建議分批處理`;
+      return;
+    }
 
     const allFiles = filesA.length + filesB.length + filesC.length;
     let processed = 0;
@@ -168,7 +175,8 @@ async function buildFileMap(files, useHash, progressCb, signal) {
     const nameSizeMap = new Map();
     
     // Phase 1: Group by name+size (with batching for large folders)
-    const batchSize = 1000; // Process files in batches
+    // Smaller batch size for Raspberry Pi to avoid memory issues
+    const batchSize = 500; // Reduced for Raspberry Pi compatibility
     for (let i = 0; i < files.length; i += batchSize) {
       if (signal && signal.aborted) {
         throw new Error('AbortError');
@@ -187,15 +195,15 @@ async function buildFileMap(files, useHash, progressCb, signal) {
         progressCb();
       }
       
-      // Allow other operations to run between batches
+      // Allow other operations to run between batches (longer delay for Raspberry Pi)
       if (i + batchSize < files.length) {
-        await new Promise(resolve => setTimeout(resolve, 0));
+        await new Promise(resolve => setTimeout(resolve, 10));
       }
     }
     
     // Phase 2: Hash only files that have potential duplicates (with batching)
     const candidates = Array.from(nameSizeMap.entries()).filter(([_, fileList]) => fileList.length > 1);
-    const hashBatchSize = 10; // Smaller batch size for hashing (more CPU intensive)
+    const hashBatchSize = 5; // Even smaller for Raspberry Pi CPU limitations
     
     for (let i = 0; i < candidates.length; i += hashBatchSize) {
       if (signal && signal.aborted) {
@@ -221,13 +229,17 @@ async function buildFileMap(files, useHash, progressCb, signal) {
           } catch (e) {
             skipped += 1;
             console.warn('Skip unreadable file:', relPath, e);
+            // Log specific error for Raspberry Pi debugging
+            if (e.message && e.message.includes('too large')) {
+              console.warn('File size limit exceeded:', relPath, file.size);
+            }
           }
         }
       }
       
-      // Allow other operations to run between hash batches
+      // Allow other operations to run between hash batches (longer delay for Raspberry Pi)
       if (i + hashBatchSize < candidates.length) {
-        await new Promise(resolve => setTimeout(resolve, 0));
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
     }
     
@@ -269,6 +281,11 @@ async function buildFileMap(files, useHash, progressCb, signal) {
 
 async function sha256File(file) {
   // Read as ArrayBuffer, catch permission or transient read errors at caller
+  // Add size check for Raspberry Pi memory limitations
+  if (file.size > 100 * 1024 * 1024) { // 100MB limit
+    throw new Error(`File too large for processing: ${file.size} bytes`);
+  }
+  
   const buf = await file.arrayBuffer();
   const hash = await crypto.subtle.digest('SHA-256', buf);
   return hexFromBuffer(hash);
