@@ -4,13 +4,18 @@ const state = {
   filesB: [],
   filesC: [],
   hashing: false,
+  paused: false,
+  abortController: null,
+  partialResults: null,
 };
 
 const dirA = document.getElementById('dirA');
 const dirB = document.getElementById('dirB');
 const dirC = document.getElementById('dirC');
 const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
 const resetBtn = document.getElementById('resetBtn');
+const deleteBtn = document.getElementById('deleteBtn');
 const statusEl = document.getElementById('status');
 const progressWrap = document.getElementById('progressWrap');
 const progressBar = document.getElementById('progressBar');
@@ -18,11 +23,15 @@ const compareMode = document.getElementById('compareMode');
 const nameFallback = document.getElementById('nameFallback');
 const tableBody = document.querySelector('#resultsTable tbody');
 const summary = document.getElementById('summary');
+const selectAllA = document.getElementById('selectAllA');
+const selectAllB = document.getElementById('selectAllB');
+const selectAllC = document.getElementById('selectAllC');
 
 function updateReady() {
   const count = [dirA.files.length > 0, dirB.files.length > 0, dirC.files.length > 0].filter(Boolean).length;
   const ok = count >= 2;
   startBtn.disabled = !ok || state.hashing;
+  stopBtn.disabled = !state.hashing;
   statusEl.textContent = ok ? '可以開始比對' : '請至少選擇兩個資料夾';
 }
 
@@ -31,6 +40,11 @@ dirB.addEventListener('change', updateReady);
 dirC.addEventListener('change', updateReady);
 
 resetBtn.addEventListener('click', () => {
+  // Cancel any ongoing operation
+  if (state.abortController) {
+    state.abortController.abort();
+  }
+  
   dirA.value = '';
   dirB.value = '';
   dirC.value = '';
@@ -41,12 +55,27 @@ resetBtn.addEventListener('click', () => {
   progressBar.style.width = '0%';
   statusEl.textContent = '請至少選擇兩個資料夾';
   startBtn.disabled = true;
+  stopBtn.disabled = true;
+  deleteBtn.disabled = true;
+  selectAllA.checked = false;
+  selectAllB.checked = false;
+  selectAllC.checked = false;
+  
+  // Reset state
+  state.hashing = false;
+  state.paused = false;
+  state.abortController = null;
+  state.partialResults = null;
 });
 
 startBtn.addEventListener('click', async () => {
   if (state.hashing) return;
   state.hashing = true;
+  state.paused = false;
+  state.abortController = new AbortController();
+  state.partialResults = null;
   startBtn.disabled = true;
+  stopBtn.disabled = false;
   progressWrap.classList.remove('hidden');
   progressBar.style.width = '0%';
   tableBody.innerHTML = '';
@@ -68,36 +97,77 @@ startBtn.addEventListener('click', async () => {
       progressBar.style.width = `${Math.round((processed / Math.max(allFiles, 1)) * 100)}%`;
     };
 
-    const promises = [buildFileMap(filesA, useHash, tick), buildFileMap(filesB, useHash, tick)];
-    if (filesC.length) promises.push(buildFileMap(filesC, useHash, tick));
-    const built = await Promise.all(promises);
-    const resA = built[0];
-    const resB = built[1];
-    const resC = built[2] || { map: new Map(), skipped: 0 };
+    // Process folders one by one to save partial results
+    const resA = await buildFileMap(filesA, useHash, tick, state.abortController.signal);
+    const resB = await buildFileMap(filesB, useHash, tick, state.abortController.signal);
+    
+    // Save partial results after processing A and B
+    const partialAB = compareMaps(resA.map, resB.map, new Map(), { nameAssist });
+    state.partialResults = { results: partialAB, resA, resB, resC: { map: new Map(), skipped: 0 } };
+    
+    const resC = filesC.length ? await buildFileMap(filesC, useHash, tick, state.abortController.signal) : { map: new Map(), skipped: 0 };
 
     const results = compareMaps(resA.map, resB.map, resC.map, { nameAssist });
+    state.partialResults = { results, resA, resB, resC };
     renderResults(results);
 
     const counts = summarize(results);
     const skipped = resA.skipped + resB.skipped + resC.skipped;
+    const duplicateCount = counts.all3 + counts.any2;
     summary.classList.remove('hidden');
-    summary.textContent = `共 ${counts.total} 筆記錄；三處相同 ${counts.all3}，兩處相同 ${counts.any2}，同名同路徑 ${counts.nameMatches}${skipped ? `；跳過無法讀取檔案 ${skipped}` : ''}`;
+    summary.textContent = `顯示 ${duplicateCount} 個重複檔案（三處相同 ${counts.all3}，兩處相同 ${counts.any2}）${skipped ? `；跳過無法讀取檔案 ${skipped}` : ''}`;
     statusEl.textContent = skipped ? '完成（部分檔案無法讀取，已跳過）' : '完成';
+    deleteBtn.disabled = false;
   } catch (err) {
-    console.error(err);
-    statusEl.textContent = `發生錯誤：${err && err.message ? err.message : String(err)}`;
+    if (err.name === 'AbortError') {
+      // Show partial results if available
+      if (state.partialResults) {
+        const { results, resA, resB, resC } = state.partialResults;
+        renderResults(results);
+        
+        const counts = summarize(results);
+        const skipped = resA.skipped + resB.skipped + resC.skipped;
+        const duplicateCount = counts.all3 + counts.any2;
+        summary.classList.remove('hidden');
+        summary.textContent = `顯示 ${duplicateCount} 個重複檔案（三處相同 ${counts.all3}，兩處相同 ${counts.any2}）${skipped ? `；跳過無法讀取檔案 ${skipped}` : ''}（部分結果）`;
+        statusEl.textContent = '比對已停止（顯示部分結果）';
+        deleteBtn.disabled = false;
+      } else {
+        statusEl.textContent = '比對已停止';
+      }
+    } else {
+      console.error(err);
+      statusEl.textContent = `發生錯誤：${err && err.message ? err.message : String(err)}`;
+    }
   } finally {
     state.hashing = false;
+    state.paused = false;
+    state.abortController = null;
     startBtn.disabled = false;
+    stopBtn.disabled = true;
     progressWrap.classList.add('hidden');
   }
 });
 
-async function buildFileMap(files, useHash, progressCb) {
+// Stop functionality
+stopBtn.addEventListener('click', () => {
+  if (state.hashing) {
+    // Stop the comparison
+    state.abortController.abort();
+    statusEl.textContent = '比對已停止';
+  }
+});
+
+async function buildFileMap(files, useHash, progressCb, signal) {
   // Map key: hash if useHash, else path; value: { paths: Set<path>, size }
   const map = new Map();
   let skipped = 0;
   for (const file of files) {
+    // Check if operation was aborted
+    if (signal && signal.aborted) {
+      throw new Error('AbortError');
+    }
+    
     const relPath = file.webkitRelativePath || file.name;
     const size = file.size;
     let key;
@@ -215,7 +285,10 @@ function intersects(s1, s2) {
 
 function renderResults(rows) {
   const frag = document.createDocumentFragment();
-  for (const r of rows) {
+  // Only show duplicate files (appearing in 2 or more folders)
+  const duplicateRows = rows.filter(r => r.tag === 'all3' || r.tag === 'any2');
+  
+  for (const r of duplicateRows) {
     const tr = document.createElement('tr');
     if (r.tag === 'all3') tr.classList.add('all3');
     if (r.tag === 'any2') tr.classList.add('any2');
@@ -231,9 +304,9 @@ function renderResults(rows) {
     hashCell.className = 'hash';
     hashCell.textContent = r.hash ? r.hash.slice(0, 16) + '…' : '';
 
-    const cellA = presenceCell(r.aPaths);
-    const cellB = presenceCell(r.bPaths);
-    const cellC = presenceCell(r.cPaths);
+    const cellA = presenceCell(r.aPaths, 'A');
+    const cellB = presenceCell(r.bPaths, 'B');
+    const cellC = presenceCell(r.cPaths, 'C');
 
     if (r.tag === 'all3') {
       tr.classList.add('row-all3');
@@ -260,10 +333,16 @@ function renderResults(rows) {
   tableBody.appendChild(frag);
 }
 
-function presenceCell(paths) {
+function presenceCell(paths, column) {
   const td = document.createElement('td');
   const wrapper = document.createElement('div');
   wrapper.className = 'cell-presence';
+
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.disabled = paths.length === 0;
+  checkbox.dataset.column = column;
+  wrapper.appendChild(checkbox);
 
   const dot = document.createElement('span');
   dot.className = 'dot' + (paths.length ? ' on' : '');
@@ -295,5 +374,78 @@ function summarize(rows) {
   }
   return { total: rows.length, all3, any2, nameMatches };
 }
+
+// Delete functionality
+deleteBtn.addEventListener('click', () => {
+  const selectedFiles = getSelectedFiles();
+  if (selectedFiles.length === 0) {
+    alert('請先選擇要刪除的檔案');
+    return;
+  }
+  
+  if (confirm(`確定要刪除 ${selectedFiles.length} 個檔案嗎？此操作無法復原。`)) {
+    deleteSelectedFiles(selectedFiles);
+  }
+});
+
+function getSelectedFiles() {
+  const selected = [];
+  const checkboxes = tableBody.querySelectorAll('input[type="checkbox"]:checked');
+  for (const cb of checkboxes) {
+    const row = cb.closest('tr');
+    const pathCell = row.querySelector('.path');
+    const column = cb.dataset.column;
+    if (pathCell && column) {
+      selected.push({
+        path: pathCell.textContent.trim(),
+        column: column
+      });
+    }
+  }
+  return selected;
+}
+
+function deleteSelectedFiles(selectedFiles) {
+  // Note: Browser security prevents direct file deletion
+  // This is a placeholder for the UI feedback
+  console.log('Files to delete:', selectedFiles);
+  alert('由於瀏覽器安全限制，無法直接刪除檔案。請手動刪除以下檔案：\n\n' + 
+    selectedFiles.map(f => `${f.column}: ${f.path}`).join('\n'));
+  
+  // Remove selected rows from table
+  const checkboxes = tableBody.querySelectorAll('input[type="checkbox"]:checked');
+  for (const cb of checkboxes) {
+    const row = cb.closest('tr');
+    if (row) {
+      row.remove();
+    }
+  }
+  
+  // Update summary
+  const remainingRows = tableBody.querySelectorAll('tr').length;
+  summary.textContent = `剩餘 ${remainingRows} 個重複檔案（已移除選取的檔案）`;
+}
+
+// Select all functionality
+selectAllA.addEventListener('change', () => {
+  const checkboxes = tableBody.querySelectorAll('input[data-column="A"]:not([disabled])');
+  for (const cb of checkboxes) {
+    cb.checked = selectAllA.checked;
+  }
+});
+
+selectAllB.addEventListener('change', () => {
+  const checkboxes = tableBody.querySelectorAll('input[data-column="B"]:not([disabled])');
+  for (const cb of checkboxes) {
+    cb.checked = selectAllB.checked;
+  }
+});
+
+selectAllC.addEventListener('change', () => {
+  const checkboxes = tableBody.querySelectorAll('input[data-column="C"]:not([disabled])');
+  for (const cb of checkboxes) {
+    cb.checked = selectAllC.checked;
+  }
+});
 
 

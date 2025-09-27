@@ -39,7 +39,9 @@
 
         <div class="actions">
           <button id="startBtn" disabled>開始比對</button>
+          <button id="stopBtn" class="secondary" disabled>停止比對</button>
           <button id="resetBtn" class="secondary">清除</button>
+          <button id="deleteBtn" class="danger" disabled>刪除選取檔案</button>
         </div>
 
         <div id="status" class="status">請至少選擇兩個資料夾</div>
@@ -51,7 +53,7 @@
       <section id="summary" class="summary hidden"></section>
 
       <section class="results">
-        <h2>結果</h2>
+        <h2>重複檔案結果</h2>
         <div class="legend">
           <span class="badge all3">三處相同</span>
           <span class="badge any2">兩處相同</span>
@@ -63,9 +65,27 @@
               <th>檔案(相對路徑)</th>
               <th>大小</th>
               <th>雜湊</th>
-              <th>A</th>
-              <th>B</th>
-              <th>C</th>
+              <th>
+                A
+                <label class="select-all">
+                  <input type="checkbox" id="selectAllA">
+                  <span>全選</span>
+                </label>
+              </th>
+              <th>
+                B
+                <label class="select-all">
+                  <input type="checkbox" id="selectAllB">
+                  <span>全選</span>
+                </label>
+              </th>
+              <th>
+                C
+                <label class="select-all">
+                  <input type="checkbox" id="selectAllC">
+                  <span>全選</span>
+                </label>
+              </th>
             </tr>
           </thead>
           <tbody></tbody>

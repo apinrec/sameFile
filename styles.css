@@ -28,6 +28,8 @@ h2 { font-size: 18px; margin: 24px 0 8px; }
 .actions { display: flex; gap: 12px; margin-top: 12px; }
 button { background: var(--primary); color: white; border: none; border-radius: 8px; padding: 10px 14px; cursor: pointer; font-weight: 600; }
 button.secondary { background: transparent; color: var(--muted); border: 1px solid rgba(255,255,255,0.12); }
+button.danger { background: #dc2626; }
+button.danger:hover:not(:disabled) { background: #b91c1c; }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .status { margin-top: 10px; color: var(--muted); font-size: 13px; }
@@ -47,6 +49,8 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 12px; overflow: hidden; border: 1px solid rgba(255,255,255,0.06); }
 thead th { text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; background: rgba(255,255,255,0.02); }
 th, td { padding: 10px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); vertical-align: top; }
+.select-all { display: flex; align-items: center; gap: 4px; font-size: 11px; margin-top: 4px; }
+.select-all input[type="checkbox"] { margin: 0; }
 tbody tr:hover { background: rgba(255,255,255,0.03); }
 
 .cell-presence { display: inline-flex; align-items: center; gap: 6px; }
